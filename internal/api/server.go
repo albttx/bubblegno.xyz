@@ -60,13 +60,14 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	seed := strings.TrimSpace(q.Get("seed"))
-	depth := clampInt(atoiDef(q.Get("depth"), 1), 1, 3)
-	limit := clampInt(atoiDef(q.Get("limit"), 150), 1, 500)
+	depth := clampInt(atoiDef(q.Get("depth"), 1), 1, 5)
+	limit := clampInt(atoiDef(q.Get("limit"), 300), 1, 1000)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	resp := s.buildGraph(ctx, seed, depth, limit)
+	f := Filter{MinWeight: clampInt(atoiDef(q.Get("minWeight"), 1), 1, 1000), Kinds: parseKinds(q.Get("kinds"))}
+	resp := s.buildGraph(ctx, seed, depth, limit, f)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -156,4 +157,25 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// parseKinds reads ?kinds=EOA,REALM,PACKAGE (case-insensitive). Empty or
+// unrecognised → nil (no kind filter).
+func parseKinds(raw string) map[string]bool {
+	out := map[string]bool{}
+	for _, k := range strings.Split(raw, ",") {
+		k = strings.ToUpper(strings.TrimSpace(k))
+		if k == "PKG" {
+			k = "PACKAGE"
+		}
+		for _, a := range AllKinds {
+			if k == a {
+				out[k] = true
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

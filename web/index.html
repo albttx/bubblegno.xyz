@@ -3,12 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>bubblegno — gno.land bubble map</title>
   </head>
   <body>
     <div id="graph"></div>
     <header class="bar">
-      <div class="brand">bubble<span>gno</span></div>
+      <a class="brand" href="/" aria-label="bubblegno home">
+        <img src="/logo.png" alt="" width="40" height="40" />
+        <span class="brand-text">bubble<span>gno</span></span>
+      </a>
       <form id="search">
         <div class="combo">
           <input id="seed" placeholder="search g1… address, realm path or label" autocomplete="off" spellcheck="false"
@@ -20,10 +25,21 @@
           <option value="1">1 hop</option>
           <option value="2">2 hops</option>
           <option value="3">3 hops</option>
+          <option value="4">4 hops</option>
+          <option value="5">5 hops</option>
         </select>
         <select id="limit" title="max nodes">
-          <option>50</option><option selected>150</option><option>300</option><option>500</option>
+          <option>50</option><option>150</option><option selected>300</option><option>500</option><option>1000</option>
         </select>
+        <select id="minWeight" title="min interactions per link">
+          <option value="1" selected>≥1 tx</option><option value="2">≥2 tx</option><option value="3">≥3 tx</option>
+          <option value="5">≥5 tx</option><option value="10">≥10 tx</option><option value="20">≥20 tx</option><option value="50">≥50 tx</option>
+        </select>
+        <div class="kinds" role="group" aria-label="node kinds">
+          <button type="button" class="kind-toggle on" data-kind="EOA" aria-pressed="true" title="show EOAs"><i style="background: var(--eoa)"></i>EOA</button>
+          <button type="button" class="kind-toggle on" data-kind="REALM" aria-pressed="true" title="show realms"><i style="background: var(--realm)"></i>Realm</button>
+          <button type="button" class="kind-toggle on" data-kind="PACKAGE" aria-pressed="true" title="show packages"><i style="background: var(--pkg)"></i>Pkg</button>
+        </div>
         <button type="submit">Explore</button>
         <button type="button" id="reset" class="ghost">Top</button>
         <button type="button" id="refresh" class="ghost" title="refresh">⟳</button>

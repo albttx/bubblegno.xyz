@@ -56,6 +56,17 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const seedInput = $<HTMLInputElement>('seed')
 const depthSel = $<HTMLSelectElement>('depth')
 const limitSel = $<HTMLSelectElement>('limit')
+const minWeightSel = $<HTMLSelectElement>('minWeight')
+const kindBtns = [...document.querySelectorAll<HTMLButtonElement>('.kind-toggle')]
+const ALL_KINDS = ['EOA', 'REALM', 'PACKAGE']
+const selectedKinds = () => kindBtns.filter((b) => b.classList.contains('on')).map((b) => b.dataset.kind!)
+function setKinds(kinds: string[]) {
+  for (const b of kindBtns) {
+    const on = kinds.includes(b.dataset.kind!)
+    b.classList.toggle('on', on)
+    b.setAttribute('aria-pressed', String(on))
+  }
+}
 const statusEl = $<HTMLSpanElement>('status')
 const panel = $<HTMLElement>('panel')
 
@@ -161,6 +172,9 @@ async function load() {
   syncClear()
   const seed = seedInput.value.trim()
   const qs = new URLSearchParams({ depth: depthSel.value, limit: limitSel.value })
+  if (minWeightSel.value !== '1') qs.set('minWeight', minWeightSel.value)
+  const kinds = selectedKinds()
+  if (kinds.length < ALL_KINDS.length) qs.set('kinds', kinds.join(','))
   if (seed) qs.set('seed', seed)
   statusEl.textContent = 'loading…'
   try {
@@ -205,18 +219,31 @@ function closePanel() {
   panel.classList.add('hidden')
 }
 
-const link = (a: string) => (a ? `<a data-id="${esc(a)}" title="${esc(a)}">${esc(short(a))}</a>` : '<span class="muted">?</span>')
+function gnoLandURL(a: string): string {
+  if (a.startsWith('gno.land/')) return `https://${a}`
+  if (a.startsWith('g1')) return `https://gno.land/u/${a}`
+  return `https://gno.land/${a}`
+}
+function gnoscanURL(a: string): string {
+  if (a.startsWith('gno.land/')) return `https://gnoscan.io/realms/details?path=${encodeURIComponent(a)}`
+  return `https://gnoscan.io/account/${encodeURIComponent(a)}`
+}
+const ext = (a: string) =>
+  `<a class="ext" href="${esc(gnoLandURL(a))}" target="_blank" rel="noreferrer" title="gno.land">gno</a>` +
+  `<a class="ext" href="${esc(gnoscanURL(a))}" target="_blank" rel="noreferrer" title="gnoscan.io">scan</a>`
+const link = (a: string) =>
+  a
+    ? `<span class="addr"><a data-id="${esc(a)}" title="${esc(a)}">${esc(short(a))}</a> ${ext(a)}</span>`
+    : '<span class="muted">?</span>'
+
 
 function renderPanel(d: NodeDetail) {
-  const gnoWeb = d.address.startsWith('gno.land/')
-    ? `https://${d.address}`
-    : `https://gno.land/u/${d.address}`
   panel.innerHTML = `
     <div class="panel-head">
     <button class="close">×</button>
     <span class="kind" style="background:${color(d.kind)}">${d.kind}</span>
     <h2>${esc(d.label || d.address)}</h2>
-    <div class="muted mono" style="word-break:break-all;font-size:11px">${esc(d.address)}</div>
+    <div class="muted mono" style="word-break:break-all;font-size:11px">${esc(d.address)} ${ext(d.address)}</div>
     <div class="stats">
       <div class="stat"><b>${d.txCount}</b><small>tx</small></div>
       <div class="stat"><b>${d.degree}</b><small>neighbors</small></div>
@@ -224,7 +251,8 @@ function renderPanel(d: NodeDetail) {
     </div>
     <div class="actions">
       <button id="explore">Explore from here</button>
-      <a class="ghost" href="${esc(gnoWeb)}" target="_blank" rel="noreferrer" style="align-self:center">gno.land ↗</a>
+      <a class="ghost" href="${esc(gnoLandURL(d.address))}" target="_blank" rel="noreferrer" style="align-self:center">gno.land ↗</a>
+      <a class="ghost" href="${esc(gnoscanURL(d.address))}" target="_blank" rel="noreferrer" style="align-self:center">gnoscan ↗</a>
     </div>
     </div>
     <div class="panel-body">
@@ -266,6 +294,16 @@ let selTimer: ReturnType<typeof setTimeout> | undefined
 const autoLoad = () => { clearTimeout(selTimer); selTimer = setTimeout(load, 100) }
 depthSel.addEventListener('change', autoLoad)
 limitSel.addEventListener('change', autoLoad)
+minWeightSel.addEventListener('change', autoLoad)
+for (const b of kindBtns) {
+  b.addEventListener('click', () => {
+    const on = !b.classList.contains('on')
+    if (!on && selectedKinds().length === 1) return // keep at least one kind
+    b.classList.toggle('on', on)
+    b.setAttribute('aria-pressed', String(on))
+    autoLoad()
+  })
+}
 
 // ---- search / autocomplete ----
 interface SearchHit { address: string; kind: Kind; pkgPath?: string; label?: string; activity: number; match: string }
@@ -416,6 +454,11 @@ function setSel(sel: HTMLSelectElement, v: string | null) {
 const params = new URLSearchParams(location.search)
 setSel(depthSel, params.get('depth'))
 setSel(limitSel, params.get('limit'))
+setSel(minWeightSel, params.get('minWeight'))
+{
+  const k = (params.get('kinds') ?? '').toUpperCase().split(',').map((s) => s.trim()).filter((s) => ALL_KINDS.includes(s))
+  if (k.length) setKinds(k)
+}
 seedInput.value = seedFromURL()
 window.addEventListener('hashchange', () => {
   if (location.hash === lastHash) return
@@ -430,9 +473,8 @@ load()
 // ---- live sync height (polls /v0/sync, independent of graph reload) ----
 let liveSync: { chainId: string; lastHeight: number; tip?: number } | null = null
 function syncText(chainId: string, h: number): string {
-  const s = liveSync && liveSync.lastHeight >= h ? liveSync : { chainId, lastHeight: h, tip: liveSync?.tip }
-  const tip = s.tip ? ` / ${s.tip.toLocaleString()}` : ''
-  return `${esc(s.chainId)} @ ${s.lastHeight.toLocaleString()}${tip}`
+  const s = liveSync && liveSync.lastHeight >= h ? liveSync : { chainId, lastHeight: h }
+  return `${esc(s.chainId)} @ ${s.lastHeight.toLocaleString()}`
 }
 async function pollSync() {
   try {

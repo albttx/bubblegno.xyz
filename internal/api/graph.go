@@ -51,14 +51,44 @@ type SyncInfo struct {
 }
 
 type GraphResponse struct {
-	Nodes   []Node   `json:"nodes"`
-	Links   []Link   `json:"links"`
-	Seed    string   `json:"seed"`
-	Depth   int      `json:"depth"`
-	Limit   int      `json:"limit"`
-	Sync    SyncInfo `json:"sync"`
-	Warning string   `json:"warning,omitempty"`
+	Nodes     []Node   `json:"nodes"`
+	Links     []Link   `json:"links"`
+	Seed      string   `json:"seed"`
+	Depth     int      `json:"depth"`
+	Limit     int      `json:"limit"`
+	MinWeight int      `json:"minWeight"`
+	Kinds     []string `json:"kinds"`
+	Sync      SyncInfo `json:"sync"`
+	Warning   string   `json:"warning,omitempty"`
 }
+
+// AllKinds is the default kinds filter (UNKNOWN nodes only show when unfiltered).
+var AllKinds = []string{"EOA", "REALM", "PACKAGE"}
+
+// Filter narrows the graph before the limit cut.
+//   - MinWeight: drop links with Weight < MinWeight.
+//   - Kinds: keep only nodes whose Kind is in the set (empty / all three = no kind filter).
+//
+// Nodes left without any link are dropped when a filter is active, except Seed.
+type Filter struct {
+	MinWeight int
+	Kinds     map[string]bool
+	Seed      string
+}
+
+func (f Filter) kindActive() bool {
+	if len(f.Kinds) == 0 {
+		return false
+	}
+	for _, k := range AllKinds {
+		if !f.Kinds[k] {
+			return true
+		}
+	}
+	return false
+}
+
+func (f Filter) active() bool { return f.MinWeight > 1 || f.kindActive() }
 
 // ---- Dgraph GraphQL shapes ----
 
@@ -274,12 +304,29 @@ func bubbleSize(degree, volumeUgnot int64) float64 {
 	return math.Round(s*100) / 100
 }
 
-func (g *agg) finalize(limit int, keep map[string]bool) ([]Node, []Link) {
+func (g *agg) finalize(limit int, keep map[string]bool, f Filter) ([]Node, []Link) {
 	for id, n := range g.nodes {
 		n.Degree = max(n.Degree, int64(len(g.nbrs[id])))
 	}
+	// filters run before the limit cut so `limit` counts surviving nodes
+	allowed := func(n *Node) bool {
+		return n.ID == f.Seed || !f.kindActive() || f.Kinds[n.Kind]
+	}
+	linked := map[string]bool{}
+	if f.active() {
+		for k, l := range g.links {
+			if l.Weight < int64(max(f.MinWeight, 1)) || !allowed(g.nodes[l.Source]) || !allowed(g.nodes[l.Target]) {
+				delete(g.links, k)
+				continue
+			}
+			linked[l.Source], linked[l.Target] = true, true
+		}
+	}
 	all := make([]*Node, 0, len(g.nodes))
 	for _, n := range g.nodes {
+		if f.active() && n.ID != f.Seed && (!allowed(n) || !linked[n.ID]) {
+			continue
+		}
 		all = append(all, n)
 	}
 	score := func(n *Node) float64 {
@@ -398,8 +445,16 @@ func (g *agg) ingestExpand(seen map[string]bool, r *expandResult) {
 	}
 }
 
-func (s *Server) buildGraph(ctx context.Context, seed string, depth, limit int) GraphResponse {
-	resp := GraphResponse{Nodes: []Node{}, Links: []Link{}, Seed: seed, Depth: depth, Limit: limit}
+func (s *Server) buildGraph(ctx context.Context, seed string, depth, limit int, f Filter) GraphResponse {
+	resp := GraphResponse{Nodes: []Node{}, Links: []Link{}, Seed: seed, Depth: depth, Limit: limit, MinWeight: max(f.MinWeight, 1), Kinds: AllKinds}
+	if f.kindActive() {
+		resp.Kinds = []string{}
+		for _, k := range AllKinds {
+			if f.Kinds[k] {
+				resp.Kinds = append(resp.Kinds, k)
+			}
+		}
+	}
 	resp.Sync = s.syncInfo(ctx)
 
 	g := newAgg()
@@ -472,7 +527,11 @@ func (s *Server) buildGraph(ctx context.Context, seed string, depth, limit int) 
 		}
 	}
 
-	resp.Nodes, resp.Links = g.finalize(limit, keep)
+	f.Seed = resp.Seed
+	if seed == "" {
+		f.Seed = ""
+	}
+	resp.Nodes, resp.Links = g.finalize(limit, keep, f)
 	return resp
 }
 
@@ -546,7 +605,7 @@ func (s *Server) nodeDetail(ctx context.Context, rawID string) (*NodeDetail, err
 	}
 	g := newAgg()
 	g.ingestExpand(map[string]bool{}, r)
-	nodes, links := g.finalize(1_000_000, map[string]bool{id: true})
+	nodes, links := g.finalize(1_000_000, map[string]bool{id: true}, Filter{})
 
 	byID := map[string]Node{}
 	for _, n := range nodes {
