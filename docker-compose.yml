@@ -1,0 +1,29 @@
+services:
+  zero:
+    image: dgraph/dgraph:v24.1.2
+    container_name: bubblegno-zero
+    working_dir: /dgraph
+    volumes:
+      - ./deploy/dgraph/data:/dgraph
+    ports:
+      - "5080:5080"
+      - "6080:6080"
+    command: dgraph zero --my=zero:5080
+    restart: unless-stopped
+
+  alpha:
+    image: dgraph/dgraph:v24.1.2
+    container_name: bubblegno-alpha
+    working_dir: /dgraph
+    volumes:
+      - ./deploy/dgraph/data:/dgraph
+      - ./deploy/dgraph/schema.graphql:/dgraph/schema.graphql:ro
+    ports:
+      - "8080:8080"
+      - "9080:9080"
+    environment:
+      DGRAPH_ALPHA_SECURITY: whitelist=0.0.0.0/0
+    command: dgraph alpha --my=alpha:7080 --zero=zero:5080 --security whitelist=0.0.0.0/0
+    depends_on:
+      - zero
+    restart: unless-stopped

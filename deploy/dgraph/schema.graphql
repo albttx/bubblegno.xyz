@@ -1,0 +1,80 @@
+# bubblegno.xyz — Dgraph GraphQL schema (v0)
+# Apply: curl -X POST localhost:8080/admin/schema --data-binary @deploy/dgraph/schema.graphql
+
+type Account {
+  id: ID!
+  address: String! @id @search(by: [exact, regexp])
+  kind: AccountKind! @search
+  pkgPath: String @search(by: [exact, regexp])
+  label: String @search(by: [exact, fulltext, regexp])
+  txCount: Int64
+  volumeUgnot: Int64
+  degree: Int64
+  transfersFrom: [Transfer] @hasInverse(field: from)
+  transfersTo: [Transfer] @hasInverse(field: to)
+  callsAsCaller: [Call] @hasInverse(field: caller)
+  callsAsRealm: [Call] @hasInverse(field: realm)
+  deploys: [Deploy] @hasInverse(field: creator)
+  links: [Link] @hasInverse(field: from)
+}
+
+enum AccountKind {
+  EOA
+  REALM
+  PACKAGE
+  UNKNOWN
+}
+
+type Transfer {
+  id: ID!
+  uidKey: String! @id @search(by: [hash])
+  hash: String! @search(by: [hash])
+  height: Int64! @search
+  index: Int64
+  amount: Int64!
+  denom: String! @search(by: [exact])
+  from: Account!
+  to: Account!
+}
+
+type Call {
+  id: ID!
+  uidKey: String! @id @search(by: [hash])
+  hash: String! @search(by: [hash])
+  height: Int64! @search
+  index: Int64
+  func: String! @search(by: [exact, fulltext])
+  pkgPath: String! @search(by: [exact])
+  send: String
+  caller: Account!
+  realm: Account!
+}
+
+type Deploy {
+  id: ID!
+  uidKey: String! @id @search(by: [hash])
+  hash: String! @search(by: [hash])
+  height: Int64! @search
+  pkgPath: String! @search(by: [exact])
+  creator: Account!
+  package: Account!
+}
+
+# Aggregated undirected-ish edge for bubble layout (weight = interaction strength)
+type Link {
+  id: ID!
+  uidKey: String! @id @search(by: [hash])
+  weight: Int64! @search
+  volumeUgnot: Int64
+  lastHeight: Int64 @search
+  kinds: [String!]
+  from: Account!
+  to: Account!
+}
+
+type SyncState {
+  id: ID!
+  chainId: String! @id @search(by: [exact])
+  lastHeight: Int64!
+  updatedAt: DateTime!
+}

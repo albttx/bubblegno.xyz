@@ -1,0 +1,12 @@
+.git
+.github
+bin/
+logs/
+web/
+deploy/dgraph/data
+.env
+.env.*
+!.env.example
+*.test
+Dockerfile
+docker-compose*.yml

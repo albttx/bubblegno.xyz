@@ -1,0 +1,43 @@
+# Production (droplet /opt/bubblegno): Dgraph bound to localhost only (Docker bypasses ufw for published ports).
+# API runs from ghcr.io/albttx/bubblegno, published by .github/workflows/ghcr.yml.
+services:
+  zero:
+    image: dgraph/dgraph:v24.1.2
+    container_name: bubblegno-zero
+    working_dir: /dgraph
+    volumes:
+      - ./deploy/dgraph/data:/dgraph
+    ports:
+      - "127.0.0.1:5080:5080"
+      - "127.0.0.1:6080:6080"
+    command: dgraph zero --my=zero:5080
+    restart: unless-stopped
+  alpha:
+    image: dgraph/dgraph:v24.1.2
+    container_name: bubblegno-alpha
+    working_dir: /dgraph
+    volumes:
+      - ./deploy/dgraph/data:/dgraph
+      - ./deploy/dgraph/schema.graphql:/dgraph/schema.graphql:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9080:9080"
+    command: dgraph alpha --my=alpha:7080 --zero=zero:5080 --security whitelist=0.0.0.0/0 --cache size-mb=256
+    depends_on:
+      - zero
+    restart: unless-stopped
+  api:
+    image: ghcr.io/albttx/bubblegno:latest
+    container_name: bubblegno-api
+    command: ["-window=100"]
+    env_file: /etc/bubblegno.env
+    environment:
+      BUBBLEGNO_HTTP_ADDR: ":8090"
+      BUBBLEGNO_DGRAPH_HTTP: http://alpha:8080
+      BUBBLEGNO_DGRAPH_GRPC: alpha:9080
+    ports:
+      - "8090:8090"
+    depends_on:
+      - alpha
+    restart: unless-stopped
+    mem_limit: 300m
