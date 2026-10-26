@@ -173,12 +173,14 @@ window.addEventListener('resize', () => graph.width(innerWidth).height(innerHeig
 async function load() {
   closeSuggest()
   syncClear()
-  const seed = seedInput.value.trim()
-  const qs = new URLSearchParams({ depth: depthSel.value, limit: limitSel.value })
-  if (minWeightSel.value !== '1') qs.set('minWeight', minWeightSel.value)
-  const kinds = selectedKinds()
-  if (kinds.length < ALL_KINDS.length) qs.set('kinds', kinds.join(','))
-  if (seed) qs.set('seed', seed)
+  const state = currentShareState()
+  // Reflect the controls immediately (filters, clear, reset, explore) without navigating.
+  publishURL(state)
+  // Server param stays `depth`; the share URL writes `hop` instead.
+  const qs = new URLSearchParams({ depth: state.hop, limit: state.limit })
+  if (state.minWeight !== DEFAULT_MIN_WEIGHT) qs.set('minWeight', state.minWeight)
+  if (state.kinds.length < ALL_KINDS.length) qs.set('kinds', state.kinds.join(','))
+  if (state.seed) qs.set('seed', state.seed)
   statusEl.innerHTML = '<span class="mini-spin"></span>loading…'
   const seq = ++loadSeq
   loadCtl?.abort()
@@ -193,17 +195,20 @@ async function load() {
     graph.graphData({ nodes: data.nodes, links: data.links })
     if (data.nodes.length) setTimeout(() => graph.zoomToFit(600, 80), 900)
     // server resolves seed (address or pkgPath) → canonical id: prefill it
-    if (seed && data.seed && data.seed !== seed) seedInput.value = data.seed
+    if (state.seed && data.seed && data.seed !== state.seed && seedInput.value.trim() === state.seed) {
+      seedInput.value = data.seed
+      syncClear()
+    }
     const warn = data.warning ? ` · <span class="warn">${esc(data.warning)}</span>` : ''
     statusEl.innerHTML = `${data.nodes.length} nodes · ${data.links.length} links · <span id="syncH">${syncText(data.sync.chainId, data.sync.lastHeight)}</span>${warn}`
     syncClear()
-    const canon = seedInput.value.trim()
-    const hash = canon ? `#${encodeSeed(canon)}` : ''
-    if (location.hash !== hash || location.search) {
-      // drop ?seed= once consumed; hash is the canonical shareable form
-      history.replaceState(null, '', location.pathname + hash)
-      lastHash = location.hash
-    }
+    // A newer filter change owns the address bar; only rewrite when this load still matches the controls.
+    const controlsMatch =
+      depthSel.value === state.hop &&
+      limitSel.value === state.limit &&
+      minWeightSel.value === state.minWeight &&
+      selectedKinds().join(',') === state.kinds.join(',')
+    if (controlsMatch) publishURL(currentShareState())
   } catch (e) {
     if (seq !== loadSeq) return
     statusEl.innerHTML = `<span class="warn">API unreachable (${esc(API)})</span>`
@@ -399,10 +404,6 @@ clearBtn.addEventListener('click', () => {
   lastQuery = ''
   closeSuggest()
   syncClear()
-  if (location.hash || location.search) {
-    history.replaceState(null, '', location.pathname)
-    lastHash = ''
-  }
   load()
 })
 
@@ -448,38 +449,94 @@ suggestEl.addEventListener('mousedown', (e) => {
   pick(Number(li.dataset.i))
 })
 
-// ---- prefill from URL: #<seed> (canonical) or ?seed=&depth=&limit= ----
-function encodeSeed(s: string) {
-  return s.split('/').map(encodeURIComponent).join('/')
-}
-let lastHash = location.hash
-function seedFromURL(): string {
-  if (location.hash.length > 1) {
-    try {
-      return decodeURIComponent(location.hash.slice(1))
-    } catch {
-      return location.hash.slice(1)
-    }
+// ---- shareable query state ----
+// Address bar: ?seed=&hop=&limit=&minWeight=&kinds=
+// `hop` is the share name; the depth <select> and /v0/graph still use `depth`.
+// Defaults match index.html and are omitted: hop 1, limit 300, minWeight 1,
+// kinds omitted when EOA+REALM+PACKAGE are all selected, seed omitted when empty.
+const DEFAULT_HOP = '1'
+const DEFAULT_LIMIT = '300'
+const DEFAULT_MIN_WEIGHT = '1'
+
+type ShareState = { seed: string; hop: string; limit: string; minWeight: string; kinds: string[] }
+
+function hashSeed(): string {
+  if (location.hash.length <= 1) return ''
+  const raw = location.hash.slice(1)
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
   }
-  return new URLSearchParams(location.search).get('seed') ?? new URLSearchParams(location.search).get('q') ?? ''
 }
+
+// ?seed= wins. Otherwise an old #<seed> bookmark, then legacy ?q=.
+function initialSeed(): string {
+  const params = new URLSearchParams(location.search)
+  if (params.has('seed')) return (params.get('seed') ?? '').trim()
+  const hashed = hashSeed().trim()
+  if (hashed) return hashed
+  return (params.get('q') ?? '').trim()
+}
+
+function encodeQueryValue(v: string): string {
+  return encodeURIComponent(v).replace(/%2F/gi, '/').replace(/%2C/gi, ',')
+}
+
+function shareSearch(state: ShareState): string {
+  const parts: string[] = []
+  const add = (k: string, v: string) => parts.push(`${encodeURIComponent(k)}=${encodeQueryValue(v)}`)
+  if (state.seed) add('seed', state.seed)
+  if (state.hop !== DEFAULT_HOP) add('hop', state.hop)
+  if (state.limit !== DEFAULT_LIMIT) add('limit', state.limit)
+  if (state.minWeight !== DEFAULT_MIN_WEIGHT) add('minWeight', state.minWeight)
+  const kinds = state.kinds.filter((k) => ALL_KINDS.includes(k))
+  const allOn = ALL_KINDS.every((k) => kinds.includes(k))
+  if (!allOn && kinds.length) add('kinds', kinds.join(','))
+  return parts.length ? `?${parts.join('&')}` : ''
+}
+
+function publishURL(state: ShareState) {
+  const next = location.pathname + shareSearch(state)
+  if (location.pathname + location.search + location.hash === next) return
+  history.replaceState(null, '', next)
+}
+
+function currentShareState(seed = seedInput.value.trim()): ShareState {
+  return {
+    seed,
+    hop: depthSel.value,
+    limit: limitSel.value,
+    minWeight: minWeightSel.value,
+    kinds: selectedKinds(),
+  }
+}
+
 function setSel(sel: HTMLSelectElement, v: string | null) {
-  if (v && [...sel.options].some((o) => (o.value || o.text) === v)) sel.value = v
+  if (!v) return
+  const value = v.trim()
+  if (value && [...sel.options].some((o) => (o.value || o.text) === value)) sel.value = value
 }
 const params = new URLSearchParams(location.search)
-setSel(depthSel, params.get('depth'))
+// hop wins over the legacy depth query when both are present
+setSel(depthSel, params.has('hop') ? params.get('hop') : params.get('depth'))
 setSel(limitSel, params.get('limit'))
 setSel(minWeightSel, params.get('minWeight'))
 {
   const k = (params.get('kinds') ?? '').toUpperCase().split(',').map((s) => s.trim()).filter((s) => ALL_KINDS.includes(s))
   if (k.length) setKinds(k)
 }
-seedInput.value = seedFromURL()
+seedInput.value = initialSeed()
 window.addEventListener('hashchange', () => {
-  if (location.hash === lastHash) return
-  lastHash = location.hash
-  seedInput.value = seedFromURL()
+  const hashed = hashSeed().trim()
+  if (!hashed) return
+  const same = hashed === seedInput.value.trim()
+  seedInput.value = hashed
   syncClear()
+  if (same) {
+    publishURL(currentShareState(hashed))
+    return
+  }
   load()
 })
 syncClear()
