@@ -23,6 +23,7 @@ type Server struct {
 	webDir string
 	search accCache
 	tip    tipCache
+	gcache graphCache
 }
 
 func New(cfg config.Config, dg *graph.Client) *Server {
@@ -32,6 +33,7 @@ func New(cfg config.Config, dg *graph.Client) *Server {
 	}
 	s := &Server{cfg: cfg, dg: dg, mux: http.NewServeMux(), webDir: webDir, tip: tipCache{ob: onbloc.New(cfg.OnblocGraphQL)}}
 	s.routes()
+	go s.warmDefault()
 	return s
 }
 
@@ -63,12 +65,22 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	depth := clampInt(atoiDef(q.Get("depth"), 1), 1, 5)
 	limit := clampInt(atoiDef(q.Get("limit"), 300), 1, 1000)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
 	f := Filter{MinWeight: clampInt(atoiDef(q.Get("minWeight"), 1), 1, 1000), Kinds: parseKinds(q.Get("kinds"))}
-	resp := s.buildGraph(ctx, seed, depth, limit, f)
-	writeJSON(w, http.StatusOK, resp)
+	key := graphKey(seed, depth, limit, f)
+	body, err := s.gcache.get(key, func() ([]byte, bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		resp := s.buildGraph(ctx, seed, depth, limit, f)
+		b, err := json.Marshal(resp)
+		return b, resp.Warning == "" || resp.Warning == "seed not found", err
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=15")
+	writeMaybeGzip(w, r, body)
 }
 
 func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {

@@ -68,6 +68,9 @@ function setKinds(kinds: string[]) {
   }
 }
 const statusEl = $<HTMLSpanElement>('status')
+const loaderEl = $<HTMLDivElement>('loader')
+let loadSeq = 0
+let loadCtl: AbortController | undefined
 const panel = $<HTMLElement>('panel')
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
@@ -176,10 +179,16 @@ async function load() {
   const kinds = selectedKinds()
   if (kinds.length < ALL_KINDS.length) qs.set('kinds', kinds.join(','))
   if (seed) qs.set('seed', seed)
-  statusEl.textContent = 'loading…'
+  statusEl.innerHTML = '<span class="mini-spin"></span>loading…'
+  const seq = ++loadSeq
+  loadCtl?.abort()
+  loadCtl = new AbortController()
+  loaderEl.classList.remove('hidden')
+  document.body.classList.add('is-loading')
   try {
-    const res = await fetch(`${API}/v0/graph?${qs}`)
+    const res = await fetch(`${API}/v0/graph?${qs}`, { signal: loadCtl.signal })
     const data: GraphResp = await res.json()
+    if (seq !== loadSeq) return
     current = data
     graph.graphData({ nodes: data.nodes, links: data.links })
     if (data.nodes.length) setTimeout(() => graph.zoomToFit(600, 80), 900)
@@ -196,7 +205,13 @@ async function load() {
       lastHash = location.hash
     }
   } catch (e) {
+    if (seq !== loadSeq) return
     statusEl.innerHTML = `<span class="warn">API unreachable (${esc(API)})</span>`
+  } finally {
+    if (seq === loadSeq) {
+      loaderEl.classList.add('hidden')
+      document.body.classList.remove('is-loading')
+    }
   }
 }
 

@@ -16,6 +16,8 @@ type Watcher struct {
 	Graph     *graph.Client
 	Window    int64
 	PollEvery time.Duration
+	// IdlePoll is used once caught up with the tip (default 20s).
+	IdlePoll  time.Duration
 	Once      bool
 	DryRun    bool
 	MaxHeight int64
@@ -28,14 +30,29 @@ func (w *Watcher) Run(ctx context.Context) error {
 	if w.PollEvery <= 0 {
 		w.PollEvery = 5 * time.Second
 	}
+	if w.IdlePoll <= 0 {
+		w.IdlePoll = 20 * time.Second
+	}
 
 	start := w.Cfg.StartHeight
 	if !w.DryRun {
-		if h, ok, err := GetSyncHeight(ctx, w.Graph, w.Cfg.ChainID); err != nil {
-			log.Printf("ingest: sync state read failed: %v (using start height %d)", err, start)
-		} else if ok {
-			start = h + 1
-			log.Printf("ingest: resume from sync height %d → next %d", h, start)
+		// Never fall back to StartHeight on a read error (e.g. Dgraph still
+		// booting after a reboot): that would rewind SyncState. Retry instead.
+		for {
+			h, ok, err := GetSyncHeight(ctx, w.Graph, w.Cfg.ChainID)
+			if err == nil {
+				if ok {
+					start = h + 1
+					log.Printf("ingest: resume from sync height %d → next %d", h, start)
+				} else {
+					log.Printf("ingest: no sync state, starting at %d", start)
+				}
+				break
+			}
+			log.Printf("ingest: sync state read failed: %v (retrying)", err)
+			if err := sleep(ctx, 3*time.Second); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -64,7 +81,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if w.Once || w.MaxHeight >= 0 {
 				return nil
 			}
-			if err := sleep(ctx, w.PollEvery); err != nil {
+			if err := sleep(ctx, w.IdlePoll); err != nil {
 				return err
 			}
 			continue

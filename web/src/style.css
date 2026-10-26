@@ -126,3 +126,15 @@ a.ext:hover { color: var(--eoa); border-color: var(--eoa); }
 .kinds .kind-toggle i { width: 8px; height: 8px; border-radius: 50%; opacity: 0.35; }
 .kinds .kind-toggle.on { background: rgba(255, 255, 255, 0.09); color: var(--text); }
 .kinds .kind-toggle.on i { opacity: 1; }
+
+/* loader */
+.loader { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 5; display: flex; align-items: center; gap: 12px;
+  padding: 14px 20px; border-radius: 14px; background: rgba(12, 14, 28, 0.82); border: 1px solid rgba(124, 92, 255, 0.35);
+  color: var(--muted); font-size: 13px; backdrop-filter: blur(6px); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); pointer-events: none;
+  transition: opacity 0.2s; }
+.loader.hidden { display: flex; opacity: 0; visibility: hidden; }
+.spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid rgba(124, 92, 255, 0.2); border-top-color: var(--accent); animation: bg-spin 0.8s linear infinite; }
+.mini-spin { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 50%; border: 2px solid rgba(124, 92, 255, 0.25); border-top-color: var(--accent); animation: bg-spin 0.8s linear infinite; }
+body.is-loading #graph { opacity: 0.55; transition: opacity 0.2s; }
+#graph { transition: opacity 0.2s; }
+@keyframes bg-spin { to { transform: rotate(360deg); } }

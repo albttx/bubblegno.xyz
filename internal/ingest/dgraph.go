@@ -54,6 +54,10 @@ func GetSyncHeight(ctx context.Context, dg *graph.Client, chainID string) (int64
 }
 
 func SetSyncHeight(ctx context.Context, dg *graph.Client, chainID string, height int64) error {
+	// guard: never move SyncState backwards
+	if cur, ok, err := GetSyncHeight(ctx, dg, chainID); err == nil && ok && cur > height {
+		return nil
+	}
 	input := []map[string]any{{
 		"chainId":    chainID,
 		"lastHeight": height,
