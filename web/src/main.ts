@@ -1,6 +1,9 @@
 import ForceGraph from 'force-graph'
 import { forceCollide } from 'd3-force'
 import './style.css'
+import { inject } from '@vercel/analytics'
+
+inject()
 
 // ---- API types (mirror internal/api/graph.go) ----
 type Kind = 'EOA' | 'REALM' | 'PACKAGE' | 'UNKNOWN'

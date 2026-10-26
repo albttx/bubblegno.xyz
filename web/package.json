@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "d3-force": "^3.0.0",
     "force-graph": "^1.49.0"
   },
